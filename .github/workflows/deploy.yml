@@ -6,13 +6,16 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      deployments: write
     steps:
       - uses: actions/checkout@v4
-      - uses: cloudflare/wrangler-action@v3
+      - uses: actions/setup-node@v4
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 3441724797f692af21f432e8625165d9
-          command: pages deploy . --project-name=${{ github.event.repository.name }} --branch=main --commit-dirty=true
+          node-version: "20"
+      - name: Create project if missing & deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 3441724797f692af21f432e8625165d9
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          npx -y wrangler@4 pages project create "$NAME" --production-branch=main || true
+          npx -y wrangler@4 pages deploy . --project-name="$NAME" --branch=main --commit-dirty=true

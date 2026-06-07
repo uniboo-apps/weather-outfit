@@ -10,7 +10,10 @@
   - 逆ジオコーディング：`api.bigdatacloud.net`（reverse-geocode-client）
 
 ## デプロイ
-- `main` に push → GitHub Actions で `<リポジトリ名>.pages.dev` へ自動デプロイ。リポジトリは **public**（`uniboo-apps` の組織シークレット使用）。
+- `main` に push → GitHub Actions で Cloudflare Pages へ自動デプロイ。
+- **本番 URL**: https://weather-outfit-7uc.pages.dev
+- リポジトリは **public**（`uniboo-apps` の組織シークレット使用）。
+- ※ Netlify の `neon-wisp-c867d9.netlify.app` は旧URL（廃止）。
 
 ## ルール
 - **public なので秘密（APIキー等）をコードに置かない**。現状すべてキー不要APIなので問題なし。

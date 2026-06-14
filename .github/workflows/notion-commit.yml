@@ -1,0 +1,54 @@
+name: Log commits to Notion
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  log-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send commits to Notion
+        uses: actions/github-script@v7
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_COMMITS_DB_ID: ${{ vars.NOTION_COMMITS_DB_ID }}
+          NOTION_APP_PAGE_ID: ${{ vars.NOTION_APP_PAGE_ID }}
+        with:
+          script: |
+            const token = process.env.NOTION_TOKEN;
+            const dbId = process.env.NOTION_COMMITS_DB_ID;
+            const appId = process.env.NOTION_APP_PAGE_ID;
+            if (!token || !dbId) {
+              core.setFailed('NOTION_TOKEN or NOTION_COMMITS_DB_ID is not set');
+              return;
+            }
+            const repo = context.repo.repo;
+            const commits = context.payload.commits || [];
+            core.info(`Sending ${commits.length} commit(s) to Notion`);
+            for (const c of commits) {
+              const title = ((c.message || '').split('\n')[0] || c.id).slice(0, 200);
+              const props = {
+                "名前":   { title: [{ text: { content: title } }] },
+                "SHA":    { rich_text: [{ text: { content: c.id.slice(0, 7) } }] },
+                "Author": { rich_text: [{ text: { content: (c.author && c.author.name) || '' } }] },
+                "Date":   { date: { start: c.timestamp } },
+                "URL":    { url: c.url },
+                "Repo":   { rich_text: [{ text: { content: repo } }] },
+              };
+              if (appId) props["App"] = { relation: [{ id: appId }] };
+              const resp = await fetch('https://api.notion.com/v1/pages', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Notion-Version': '2022-06-28',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ parent: { database_id: dbId }, properties: props }),
+              });
+              if (!resp.ok) {
+                core.warning(`Notion API failed for ${c.id.slice(0, 7)}: ${resp.status} ${await resp.text()}`);
+              } else {
+                core.info(`Logged ${c.id.slice(0, 7)}: ${title}`);
+              }
+            }

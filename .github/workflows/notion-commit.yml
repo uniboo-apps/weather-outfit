@@ -70,9 +70,11 @@ jobs:
                 core.info(`Logged ${c.id.slice(0, 7)}: ${ja}`);
               }
             }
-            // Reorder this app's relation so newest commits appear at the top (self-healing each push).
-            // Notion shows relation items in stored order; new links append at the bottom, so we rewrite
-            // the order to Date-descending. Skip if >100 to avoid the relation write cap unlinking old rows.
+            // Keep this app's commit log newest-first and bounded. Notion shows relation items in
+            // stored order (new links append at the bottom), and a relation write is capped at 100.
+            // So each push: fetch all of this app's commits Date-descending, archive (trash) the
+            // oldest beyond KEEP, then rewrite the relation to the kept ids (always <= KEEP < 100).
+            const KEEP = 90;
             if (appId) {
               try {
                 const ids = [];
@@ -92,15 +94,26 @@ jobs:
                   for (const pg of (qj.results || [])) ids.push(pg.id);
                   more = qj.has_more; cursor = qj.next_cursor;
                 }
-                if (ids.length > 0 && ids.length <= 100) {
+                // Trim the oldest commits beyond KEEP so we never hit the relation write cap.
+                if (ids.length > KEEP) {
+                  const toTrash = ids.slice(KEEP);
+                  for (const id of toTrash) {
+                    const ar = await fetch(`https://api.notion.com/v1/pages/${id}`, {
+                      method: 'PATCH', headers: notionHeaders,
+                      body: JSON.stringify({ archived: true }),
+                    });
+                    if (!ar.ok) core.warning('archive failed for ' + id + ': ' + ar.status);
+                  }
+                  ids.length = KEEP;
+                  core.info(`Trimmed ${toTrash.length} oldest commit(s) to keep newest ${KEEP}`);
+                }
+                if (ids.length > 0) {
                   const pr = await fetch(`https://api.notion.com/v1/pages/${appId}`, {
                     method: 'PATCH', headers: notionHeaders,
                     body: JSON.stringify({ properties: { "Related to コミットDB (App)": { relation: ids.map(id => ({ id })) } } }),
                   });
                   if (!pr.ok) core.warning('reorder patch failed: ' + pr.status + ' ' + await pr.text());
                   else core.info(`Reordered ${ids.length} relation(s) newest-first`);
-                } else if (ids.length > 100) {
-                  core.info('skip reorder: >100 commits (write cap)');
                 }
               } catch (e) {
                 core.warning('reorder failed: ' + e);

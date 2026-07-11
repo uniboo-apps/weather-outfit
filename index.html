@@ -124,9 +124,10 @@
 "use strict";
 
 // ===== 状態 =====
-let bodyOffset = 0;        // 体質補正(℃): 寒がり-3 / 標準0 / 暑がり+3
-let lastData = null;       // 直近の取得データ（体質切替時に再描画）
-let coords = null;
+const OFFSETS = [-3, 0, 3];   // 許可する体質補正値（寒がり / 標準 / 暑がり）
+let bodyOffset = 0;           // 体質補正(℃)
+let lastData = null;          // 直近の取得データ（体質切替時に再描画）
+let reqSeq = 0;               // 取得世代トークン（連打・レース対策：最新の取得だけ描画）
 
 // ===== 服装ロジック（体感温度 + 体質補正で判定）=====
 // adj = 体感温度 + bodyOffset。寒がりは offset を引く=より寒く感じる前提で暖かめ提案。
@@ -140,14 +141,13 @@ function outfit(apparent){
   if (t < 28) return {emoji:"👕☀️", wear:"半袖シャツ",          short:"半袖",       level:"あたたかい", detail:"半袖でOK。冷房対策に薄手の羽織りがあると安心。"};
   return            {emoji:"🥵🥤", wear:"半袖＋暑さ対策",      short:"半袖+対策",  level:"真夏の暑さ", detail:"通気性のいい半袖で。帽子・水分補給など熱中症対策を。"};
 }
-// （旧ロジック互換のためのダミー：絵文字はそのまま返す）
-function fixEmoji(o){ return o; }
 
 // ===== 取得 =====
-async function loadByCoords(lat, lon){
-  coords = {lat, lon};
+// skipGeo=true のとき逆ジオコーディングをしない（都市検索は地名が既に確定しているため）。
+async function loadByCoords(lat, lon, skipGeo){
+  const seq = ++reqSeq;
   setStatus("天気を取得中…");
-  reverseGeocode(lat, lon);
+  if(!skipGeo) reverseGeocode(lat, lon, seq);
   const url = "https://api.open-meteo.com/v1/forecast"
     + "?latitude="+lat+"&longitude="+lon
     + "&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,uv_index"
@@ -156,42 +156,85 @@ async function loadByCoords(lat, lon){
   try{
     const r = await fetch(url);
     if(!r.ok) throw new Error("HTTP "+r.status);
-    lastData = await r.json();
+    const data = await r.json();
+    if(seq !== reqSeq) return;   // 後から始まった取得が既にあるなら破棄
+    lastData = data;
+    saveCache(data, document.getElementById("place").textContent);
     render();
     hideStatus();
   }catch(e){
-    setStatus("天気の取得に失敗しました（"+e.message+"）。時間をおいて再試行してください。", true);
+    if(seq !== reqSeq) return;
+    if(!renderCachedFallback()){
+      setStatus("天気の取得に失敗しました（"+e.message+"）。時間をおいて再試行してください。", true);
+    }
   }
 }
 
-async function reverseGeocode(lat, lon){
+async function reverseGeocode(lat, lon, seq){
+  const fallback = "緯度"+lat.toFixed(2)+" / 経度"+lon.toFixed(2);
   try{
     const r = await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+lat+"&longitude="+lon+"&localityLanguage=ja");
     const j = await r.json();
+    if(seq !== reqSeq) return;   // 別の取得が進行中なら地名を上書きしない
     const name = [j.principalSubdivision, j.city || j.locality].filter(Boolean).join(" ");
-    document.getElementById("place").textContent = name || ("緯度"+lat.toFixed(2)+" / 経度"+lon.toFixed(2));
+    document.getElementById("place").textContent = name || fallback;
   }catch(_){
-    document.getElementById("place").textContent = "緯度"+lat.toFixed(2)+" / 経度"+lon.toFixed(2);
+    if(seq !== reqSeq) return;
+    document.getElementById("place").textContent = fallback;
   }
 }
 
 async function loadByCity(q){
+  const seq = ++reqSeq;
   setStatus("「"+q+"」を検索中…");
   try{
     const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count=1&language=ja");
     const j = await r.json();
+    if(seq !== reqSeq) return;
     if(!j.results || !j.results.length){ setStatus("「"+q+"」が見つかりませんでした。", true); return; }
     const g = j.results[0];
     document.getElementById("place").textContent = [g.admin1, g.name].filter(Boolean).join(" ");
-    await loadByCoords(g.latitude, g.longitude);
-    document.getElementById("place").textContent = [g.admin1, g.name].filter(Boolean).join(" "); // 上書き保持
+    await loadByCoords(g.latitude, g.longitude, true);   // 地名は確定済みなので逆ジオ不要
   }catch(e){
+    if(seq !== reqSeq) return;
     setStatus("検索に失敗しました（"+e.message+"）", true);
   }
 }
 
+// ===== オフライン用キャッシュ =====
+function saveCache(data, place){
+  try{
+    localStorage.setItem("lastForecast", JSON.stringify({data:data, place:place, ts:Date.now()}));
+  }catch(_){/* 容量超過等は無視 */}
+}
+// 取得に失敗したとき、前回データがあれば「◯時点の情報」として表示。表示できたら true。
+function renderCachedFallback(){
+  try{
+    const raw = localStorage.getItem("lastForecast");
+    if(!raw) return false;
+    const c = JSON.parse(raw);
+    if(!c || !c.data) return false;
+    lastData = c.data;
+    if(c.place) document.getElementById("place").textContent = c.place;
+    render();
+    const dt = new Date(c.ts);
+    const hm = dt.getHours()+":"+String(dt.getMinutes()).padStart(2,"0");
+    setStatus("⚠ 最新の取得に失敗。"+(dt.toLocaleDateString("ja-JP"))+" "+hm+" 時点の情報を表示中です。", true);
+    return true;
+  }catch(_){ return false; }
+}
+
 // ===== 描画 =====
 function dayName(offset){ return offset===0 ? "今日" : "明日"; }
+
+// 予報地点のタイムゾーンでの現在時刻（端末時刻ではなく API の utc_offset_seconds 基準）。
+// getUTCHours() で読むと予報地点の「時」が得られる。
+function localNow(){
+  const off = (lastData && lastData.utc_offset_seconds!=null)
+    ? lastData.utc_offset_seconds
+    : (-new Date().getTimezoneOffset()*60);
+  return new Date(Date.now() + off*1000);
+}
 
 function avgAt(times, vals, dateStr, hours){
   let s=0,n=0;
@@ -213,7 +256,7 @@ function hourEmoji(pp, temp){
 
 // 指定日の時間別配列（今日は現在時刻以降のみ）
 function hourlyFor(d, dateStr, isToday){
-  const nowH = new Date().getHours();
+  const nowH = localNow().getUTCHours();
   const out = [];
   for(let i=0;i<d.hourly.time.length;i++){
     const t = d.hourly.time[i];
@@ -232,7 +275,15 @@ function hourlyFor(d, dateStr, isToday){
 }
 
 function render(){
-  if(!lastData) return;
+  if(!lastData || !lastData.daily || !lastData.hourly){ return; }
+  try{
+    renderInner();
+  }catch(e){
+    setStatus("表示データの処理に失敗しました（"+e.message+"）。時間をおいて再試行してください。", true);
+  }
+}
+
+function renderInner(){
   const d = lastData;
   const dates = d.daily.time; // 2日分
   let html = "";
@@ -240,24 +291,25 @@ function render(){
     const date = dates[k];
     const max = d.daily.temperature_2m_max[k];
     const min = d.daily.temperature_2m_min[k];
+    if(max==null || min==null) continue;   // 稀に null が返る日はスキップ（描画全体を守る）
     const popMax = d.daily.precipitation_probability_max[k];
     const rainSum = d.daily.precipitation_sum ? d.daily.precipitation_sum[k] : null;
     const uvMax = d.daily.uv_index_max[k];
     const gap = max - min;
 
-    // 時間帯（朝7-9 / 昼12-14 / 夜19-21）の体感温度
+    // 時間帯（朝6-9 / 昼12-14 / 夜18-21）の体感温度
     const slots = [
       {label:"朝", hours:[6,7,8,9]},
       {label:"昼", hours:[12,13,14]},
       {label:"夜", hours:[18,19,20,21]}
     ].map(s=>{
       const ap = avgAt(d.hourly.time, d.hourly.apparent_temperature, date, s.hours);
-      return {label:s.label, ap:ap, o: ap!=null? fixEmoji(outfit(ap)) : null};
+      return {label:s.label, ap:ap, o: ap!=null? outfit(ap) : null};
     });
 
     // メイン提案 = 日中(昼)基準、無ければ最高気温体感の近似
     const mainAp = slots[1].ap!=null ? slots[1].ap : (max+min)/2;
-    const main = fixEmoji(outfit(mainAp));
+    const main = outfit(mainAp);
 
     // タグ
     let tags = "";
@@ -306,7 +358,7 @@ function render(){
 // ===== UI制御 =====
 function setStatus(msg, isErr){
   const s=document.getElementById("status");
-  s.style.display="block"; s.innerHTML=msg; s.className="status"+(isErr?" err":"");
+  s.style.display="block"; s.textContent=msg; s.className="status"+(isErr?" err":"");
 }
 function hideStatus(){ document.getElementById("status").style.display="none"; }
 
@@ -314,8 +366,9 @@ document.getElementById("bodyToggle").addEventListener("click", e=>{
   const b=e.target.closest("button"); if(!b) return;
   [...document.querySelectorAll("#bodyToggle button")].forEach(x=>x.classList.remove("on"));
   b.classList.add("on");
-  bodyOffset = parseInt(b.dataset.off,10);
-  localStorage.setItem("bodyOffset", bodyOffset);
+  const off = parseInt(b.dataset.off,10);
+  bodyOffset = OFFSETS.includes(off) ? off : 0;
+  try{ localStorage.setItem("bodyOffset", bodyOffset); }catch(_){}
   render();
 });
 
@@ -333,9 +386,9 @@ document.getElementById("cityInput").addEventListener("keydown", e=>{
 
 // ===== 起動 =====
 (function init(){
-  const saved = localStorage.getItem("bodyOffset");
-  if(saved!==null){
-    bodyOffset = parseInt(saved,10);
+  const saved = parseInt(localStorage.getItem("bodyOffset"),10);
+  if(OFFSETS.includes(saved)){
+    bodyOffset = saved;
     [...document.querySelectorAll("#bodyToggle button")].forEach(x=>{
       x.classList.toggle("on", parseInt(x.dataset.off,10)===bodyOffset);
     });
@@ -348,7 +401,9 @@ document.getElementById("cityInput").addEventListener("keydown", e=>{
   navigator.geolocation.getCurrentPosition(
     pos=> loadByCoords(pos.coords.latitude, pos.coords.longitude),
     err=>{
-      setStatus("位置情報を取得できませんでした（"+err.message+"）。下のボタンから都市名で検索してください。", true);
+      if(!renderCachedFallback()){
+        setStatus("位置情報を取得できませんでした（"+err.message+"）。下のボタンから都市名で検索してください。", true);
+      }
       document.getElementById("searchBox").style.display="flex";
     },
     {enableHighAccuracy:false, timeout:8000, maximumAge:600000}

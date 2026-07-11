@@ -11,6 +11,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # 開発用ファイル（会話ログ・エージェント指示・md 等）を本番へ公開しない。
+      # .assetsignore は `wrangler pages deploy` では無視されるため物理削除する
+      # （2026-07-06 の Pages 開発ファイル公開レビューに合わせて統一）。
+      - name: Strip non-public files from deploy
+        run: rm -rf .github *.md .gitignore .assetsignore
+
       - name: Create project if missing & deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

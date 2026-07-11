@@ -1,4 +1,4 @@
-const CACHE = 'outfit-v4';
+const CACHE = 'outfit-v5';
 const PRECACHE = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {

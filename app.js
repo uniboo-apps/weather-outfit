@@ -2,9 +2,18 @@
 
 // ===== 状態 =====
 const OFFSETS = [-3, 0, 3];   // 許可する体質補正値（寒がり / 標準 / 暑がり）
+// 服装提案を出す時間帯。昼(index=MAIN_SLOT_INDEX)をメイン提案の基準にする。
+const TIME_SLOTS = [
+  {label:"朝", hours:[6,7,8,9]},
+  {label:"昼", hours:[12,13,14]},
+  {label:"夜", hours:[18,19,20,21]}
+];
+const MAIN_SLOT_INDEX = 1;    // メイン提案の基準スロット（昼）
+const CITY_RESULT_COUNT = 5;  // 都市検索で取得する候補数（曖昧地名の取り違え対策）
 let bodyOffset = 0;           // 体質補正(℃)
 let lastData = null;          // 直近の取得データ（体質切替時に再描画）
 let reqSeq = 0;               // 取得世代トークン（連打・レース対策：最新の取得だけ描画）
+let cityResults = [];         // 直近の都市検索候補（候補ボタンのクリックで参照）
 
 // HTML エスケープ。innerHTML へ差し込む文字列は必ずこれを通す（将来 API 由来の値を足しても XSS にしない）。
 function esc(s){
@@ -75,19 +84,48 @@ async function reverseGeocode(lat, lon, seq){
 async function loadByCity(q){
   const seq = ++reqSeq;
   setStatus("「"+q+"」を検索中…");
+  clearCandidates();
   try{
-    const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count=1&language=ja");
+    const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count="+CITY_RESULT_COUNT+"&language=ja");
     if(!r.ok) throw new Error("HTTP "+r.status);
     const j = await r.json();
     if(seq !== reqSeq) return;
     if(!j.results || !j.results.length){ setStatus("「"+q+"」が見つかりませんでした。", true); return; }
-    const g = j.results[0];
-    document.getElementById("place").textContent = [g.admin1, g.name].filter(Boolean).join(" ");
-    await loadByCoords(g.latitude, g.longitude, true);   // 地名は確定済みなので逆ジオ不要
+    if(j.results.length === 1){ selectCity(j.results[0]); return; }
+    // 候補が複数（例: 「府中」＝東京/広島）ならユーザーに選ばせる
+    renderCandidates(j.results);
+    setStatus("候補が複数あります。地域を選んでください。");
   }catch(e){
     if(seq !== reqSeq) return;
     setStatus("検索に失敗しました（"+e.message+"）", true);
   }
+}
+
+// 候補地を1つ確定して天気を取得（地名は確定済みなので逆ジオ不要）。
+function selectCity(g){
+  clearCandidates();
+  document.getElementById("place").textContent = [g.admin1, g.name].filter(Boolean).join(" ");
+  loadByCoords(g.latitude, g.longitude, true);
+}
+
+// 都市検索候補をボタンとして描画。地域・国名を併記して取り違えを防ぐ。
+function renderCandidates(results){
+  cityResults = results;
+  const box = document.getElementById("candidates");
+  box.innerHTML = results.map((g,i)=>
+    '<button class="candidate" data-idx="'+i+'">'
+    + esc([g.name, g.admin1, g.country].filter(Boolean).join(" / "))
+    + '</button>'
+  ).join("");
+  box.style.display = "flex";
+}
+
+function clearCandidates(){
+  const box = document.getElementById("candidates");
+  if(!box) return;
+  box.innerHTML = "";
+  box.style.display = "none";
+  cityResults = [];
 }
 
 // ===== オフライン用キャッシュ =====
@@ -200,18 +238,14 @@ function renderInner(){
     const uvMax = d.daily.uv_index_max ? d.daily.uv_index_max[k] : null;
     const gap = max - min;
 
-    // 時間帯（朝6-9 / 昼12-14 / 夜18-21）の体感温度
-    const slots = [
-      {label:"朝", hours:[6,7,8,9]},
-      {label:"昼", hours:[12,13,14]},
-      {label:"夜", hours:[18,19,20,21]}
-    ].map(s=>{
+    // 各時間帯（TIME_SLOTS: 朝/昼/夜）の体感温度
+    const slots = TIME_SLOTS.map(s=>{
       const ap = avgAt(d.hourly.time, d.hourly.apparent_temperature, date, s.hours);
       return {label:s.label, ap:ap, o: ap!=null? outfit(ap) : null};
     });
 
     // メイン提案 = 日中(昼)基準、無ければ最高気温体感の近似
-    const mainAp = slots[1].ap!=null ? slots[1].ap : (max+min)/2;
+    const mainAp = slots[MAIN_SLOT_INDEX].ap!=null ? slots[MAIN_SLOT_INDEX].ap : (max+min)/2;
     const main = outfit(mainAp);
 
     // タグ
@@ -285,6 +319,11 @@ document.getElementById("cityBtn").addEventListener("click", ()=>{
 });
 document.getElementById("cityInput").addEventListener("keydown", e=>{
   if(e.key==="Enter"){ const q=e.target.value.trim(); if(q) loadByCity(q); }
+});
+document.getElementById("candidates").addEventListener("click", e=>{
+  const b=e.target.closest("button[data-idx]"); if(!b) return;
+  const g=cityResults[parseInt(b.dataset.idx,10)];
+  if(g) selectCity(g);
 });
 
 // ===== 起動 =====

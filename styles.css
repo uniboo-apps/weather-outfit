@@ -76,6 +76,11 @@ header .place{color:var(--sub);font-size:.85rem;margin-top:2px;min-height:1.1em;
 .search{display:none;gap:8px;margin:10px 0;}
 .search input{flex:1;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:1rem;}
 .search button{border:0;background:var(--accent);color:#fff;border-radius:12px;padding:0 16px;font-weight:700;cursor:pointer;}
+/* 都市検索の候補（複数ヒット時） */
+.candidates{display:none;flex-direction:column;gap:6px;margin:0 0 10px;}
+.candidate{text-align:left;border:1px solid var(--line);background:var(--card);border-radius:12px;
+  padding:11px 14px;font-size:.92rem;color:var(--ink);font-weight:600;cursor:pointer;box-shadow:var(--shadow);}
+.candidate:active{background:#eef5fc;}
 .status{text-align:center;color:var(--sub);padding:30px 10px;}
 .err{color:#c0392b;}
 footer{text-align:center;color:var(--sub);font-size:.72rem;margin-top:10px;}

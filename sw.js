@@ -1,4 +1,4 @@
-const CACHE = 'outfit-v3';
+const CACHE = 'outfit-v4';
 const PRECACHE = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -33,8 +33,10 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       fetch(req)
         .then(res => {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(req, clone));
+          if (res.ok) {                       // 500/404 等の失敗応答はキャッシュしない
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(req, clone));
+          }
           return res;
         })
         .catch(() => caches.match(req).then(c => c || caches.match('/index.html')))
@@ -47,8 +49,10 @@ self.addEventListener('fetch', e => {
       // 背景でネットワーク取得しキャッシュ更新（stale-while-revalidate）。
       // 取得できたら次回から新しい版を返す。オフライン時は cached にフォールバック。
       const network = fetch(req).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE).then(c => c.put(req, clone));
+        if (res.ok) {                         // 失敗応答をキャッシュに焼き付けない
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(req, clone));
+        }
         return res;
       }).catch(() => cached);
       return cached || network;

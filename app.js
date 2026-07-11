@@ -6,6 +6,13 @@ let bodyOffset = 0;           // 体質補正(℃)
 let lastData = null;          // 直近の取得データ（体質切替時に再描画）
 let reqSeq = 0;               // 取得世代トークン（連打・レース対策：最新の取得だけ描画）
 
+// HTML エスケープ。innerHTML へ差し込む文字列は必ずこれを通す（将来 API 由来の値を足しても XSS にしない）。
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+}
+
 // ===== 服装ロジック（体感温度 + 体質補正で判定）=====
 // adj = 体感温度 + bodyOffset。寒がりは offset を引く=より寒く感じる前提で暖かめ提案。
 function outfit(apparent){
@@ -51,6 +58,7 @@ async function reverseGeocode(lat, lon, seq){
   const fallback = "緯度"+lat.toFixed(2)+" / 経度"+lon.toFixed(2);
   try{
     const r = await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+lat+"&longitude="+lon+"&localityLanguage=ja");
+    if(!r.ok) throw new Error("HTTP "+r.status);
     const j = await r.json();
     if(seq !== reqSeq) return;   // 別の取得が進行中なら地名を上書きしない
     const name = [j.principalSubdivision, j.city || j.locality].filter(Boolean).join(" ");
@@ -69,6 +77,7 @@ async function loadByCity(q){
   setStatus("「"+q+"」を検索中…");
   try{
     const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count=1&language=ja");
+    if(!r.ok) throw new Error("HTTP "+r.status);
     const j = await r.json();
     if(seq !== reqSeq) return;
     if(!j.results || !j.results.length){ setStatus("「"+q+"」が見つかりませんでした。", true); return; }
@@ -99,12 +108,14 @@ function updateCachePlace(place){
   }catch(_){}
 }
 // 取得に失敗したとき、前回データがあれば「◯時点の情報」として表示。表示できたら true。
+const CACHE_MAX_AGE_MS = 24*60*60*1000;   // 24時間より古いキャッシュは「今日/明日」がずれるので使わない
 function renderCachedFallback(){
   try{
     const raw = localStorage.getItem("lastForecast");
     if(!raw) return false;
     const c = JSON.parse(raw);
     if(!c || !c.data) return false;
+    if(!c.ts || (Date.now() - c.ts) > CACHE_MAX_AGE_MS) return false;  // 鮮度切れは破棄（古い予報を「今日」と誤表示しない）
     lastData = c.data;
     if(c.place) document.getElementById("place").textContent = c.place;
     render();
@@ -128,11 +139,12 @@ function localNow(){
 }
 
 function avgAt(times, vals, dateStr, hours){
+  if(!vals) return null;
   let s=0,n=0;
   for(let i=0;i<times.length;i++){
     if(times[i].slice(0,10)!==dateStr) continue;
     const h = parseInt(times[i].slice(11,13),10);
-    if(hours.includes(h)){ s+=vals[i]; n++; }
+    if(hours.includes(h) && vals[i]!=null){ s+=vals[i]; n++; }  // null は平均に混ぜない（0扱いで低温誤判定を防ぐ）
   }
   return n? s/n : null;
 }
@@ -183,9 +195,9 @@ function renderInner(){
     const max = d.daily.temperature_2m_max[k];
     const min = d.daily.temperature_2m_min[k];
     if(max==null || min==null) continue;   // 稀に null が返る日はスキップ（描画全体を守る）
-    const popMax = d.daily.precipitation_probability_max[k];
+    const popMax = d.daily.precipitation_probability_max ? d.daily.precipitation_probability_max[k] : null;
     const rainSum = d.daily.precipitation_sum ? d.daily.precipitation_sum[k] : null;
-    const uvMax = d.daily.uv_index_max[k];
+    const uvMax = d.daily.uv_index_max ? d.daily.uv_index_max[k] : null;
     const gap = max - min;
 
     // 時間帯（朝6-9 / 昼12-14 / 夜18-21）の体感温度
@@ -214,15 +226,15 @@ function renderInner(){
     if(gap>=8) tags += '<span class="tag gap">🌗 昼夜の差'+gap.toFixed(0)+'℃ 羽織り持参を</span>';
 
     html += '<div class="day">'
-      + '<div class="day-head"><span class="day-title">'+dayName(k)+'</span>'
+      + '<div class="day-head"><span class="day-title">'+esc(dayName(k))+'</span>'
       + '<span class="day-temp">最高<b>'+max.toFixed(0)+'℃</b> / 最低<i>'+min.toFixed(0)+'℃</i></span></div>'
       + '<div class="main-advice"><div class="main-emoji">'+main.emoji+'</div>'
-      + '<div class="main-text">'+main.wear+'<small>'+main.detail+'</small></div></div>'
+      + '<div class="main-text">'+esc(main.wear)+'<small>'+esc(main.detail)+'</small></div></div>'
       + '<div class="slots">'
-      + slots.map(s=> '<div class="slot"><div class="label">'+s.label+'</div>'
+      + slots.map(s=> '<div class="slot"><div class="label">'+esc(s.label)+'</div>'
           + '<div class="emoji">'+(s.o?s.o.emoji:'–')+'</div>'
           + '<div class="t">'+(s.ap!=null?s.ap.toFixed(0)+'℃':'–')+'</div>'
-          + '<div class="wear">'+(s.o?s.o.short:'')+'</div></div>').join('')
+          + '<div class="wear">'+(s.o?esc(s.o.short):'')+'</div></div>').join('')
       + '</div>';
 
     // 時間別の気温（横スクロール）

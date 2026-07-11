@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#4a90d9">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -177,10 +177,13 @@ async function reverseGeocode(lat, lon, seq){
     const j = await r.json();
     if(seq !== reqSeq) return;   // 別の取得が進行中なら地名を上書きしない
     const name = [j.principalSubdivision, j.city || j.locality].filter(Boolean).join(" ");
-    document.getElementById("place").textContent = name || fallback;
+    const place = name || fallback;
+    document.getElementById("place").textContent = place;
+    updateCachePlace(place);     // 天気が先にキャッシュ保存されていても地名を確定値へ差し替え
   }catch(_){
     if(seq !== reqSeq) return;
     document.getElementById("place").textContent = fallback;
+    updateCachePlace(fallback);
   }
 }
 
@@ -206,6 +209,17 @@ function saveCache(data, place){
   try{
     localStorage.setItem("lastForecast", JSON.stringify({data:data, place:place, ts:Date.now()}));
   }catch(_){/* 容量超過等は無視 */}
+}
+// 逆ジオが後から確定したとき、直近キャッシュの地名だけ差し替える（取得時刻・データは保持）。
+function updateCachePlace(place){
+  try{
+    const raw = localStorage.getItem("lastForecast");
+    if(!raw) return;
+    const c = JSON.parse(raw);
+    if(!c) return;
+    c.place = place;
+    localStorage.setItem("lastForecast", JSON.stringify(c));
+  }catch(_){}
 }
 // 取得に失敗したとき、前回データがあれば「◯時点の情報」として表示。表示できたら true。
 function renderCachedFallback(){

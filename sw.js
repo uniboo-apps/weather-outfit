@@ -43,12 +43,15 @@ self.addEventListener('fetch', e => {
   }
 
   e.respondWith(
-    caches.match(req).then(cached =>
-      cached || fetch(req).then(res => {
+    caches.match(req).then(cached => {
+      // 背景でネットワーク取得しキャッシュ更新（stale-while-revalidate）。
+      // 取得できたら次回から新しい版を返す。オフライン時は cached にフォールバック。
+      const network = fetch(req).then(res => {
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(req, clone));
         return res;
-      })
-    )
+      }).catch(() => cached);
+      return cached || network;
+    })
   );
 });

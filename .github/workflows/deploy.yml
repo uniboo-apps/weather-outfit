@@ -85,7 +85,7 @@ jobs:
                 body: JSON.stringify({ parent: { database_id: dbId }, properties: props }),
               });
               if (!resp.ok) {
-                core.warning(`Notion API failed for ${c.id.slice(0, 7)}: ${resp.status} ${await resp.text()}`);
+                core.setFailed(`Notion API failed for ${c.id.slice(0, 7)}: ${resp.status} ${await resp.text()}`);
               } else {
                 core.info(`Logged ${c.id.slice(0, 7)}: ${ja}`);
               }

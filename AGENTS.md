@@ -1,20 +1,8 @@
-# きょうの服装ナビ（weather-outfit）
+﻿# weather-outfit — エージェント入口
 
-現在地（または検索した地名）の天気に応じて、今日の服装を提案する Web アプリ。暑がり/寒がりのトグルあり。
+この repo／配下を作業対象にしたら、以下をすべて読み、共通方針の resolver を対象パスで実行する。親を読んだだけで「ルールなし」と判断しない。
 
-## 構成・技術
-- **`index.html` 1枚で完結**（静的）。
-- 使用API（すべて**キー不要の公開API**）：
-  - 天気：`open-meteo.com`（forecast）
-  - 地名検索：`geocoding-api.open-meteo.com`
-  - 逆ジオコーディング：`api.bigdatacloud.net`（reverse-geocode-client）
+- [必読: 私用共通・優先順位・条件別ルール](C:/work/Claude/docs/agent-rules/workspace.md)
+- [必読: この repo の固有ルール](docs/agent-rules.md)
 
-## デプロイ
-- `main` に push → GitHub Actions で Cloudflare Pages へ自動デプロイ。
-- **本番 URL**: https://weather-outfit-7uc.pages.dev
-- リポジトリは **public**（`uniboo-apps` の組織シークレット使用）。
-- ※ Netlify の `neon-wisp-c867d9.netlify.app` は旧URL（廃止）。
-
-## ルール
-- **public なので秘密（APIキー等）をコードに置かない**。現状すべてキー不要APIなので問題なし。
-- モバイル前提（位置情報の許可、タップUI、`safe-area`）。
+`CLAUDE.md` は本書を読むためだけのアダプター。恒久ルールは上記正本へ、一時経緯は参考文書へ書く。
